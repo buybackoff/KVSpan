@@ -1,23 +1,84 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using SRCS = System.Runtime.CompilerServices;
 
 namespace KVPSpan
 {
-    public unsafe struct KeyValue<TKey, TValue>
+    // KeyValue from Spreads.Core
+
+    public enum KeyValuePresence
+    {
+        BothMissing = 0,
+        BothPresent = -1,
+        KeyMissing = -2, // E.g. for Fill(x) we do not calculate where the previous key was, just check if it exists and if not return given value.
+        ValueMissing = -3,
+    }
+
+
+    public static class KeyValue
+    {
+
+        public static KeyValue<TKey, TValue> Create<TKey, TValue>(in TKey key, in TValue value)
+        {
+            return new KeyValue<TKey, TValue>(in key, in value);
+        }
+
+        public static KeyValue<TKey, TValue> Create<TKey, TValue>(in TKey key, in TValue value, in long version)
+        {
+            return new KeyValue<TKey, TValue>(in key, in value, in version);
+        }
+
+        public static KeyValue<TKey, TValue> OnlyKey<TKey, TValue>(in TKey key)
+        {
+            return new KeyValue<TKey, TValue>(in key, default, -3, KeyValuePresence.ValueMissing);
+        }
+
+        public static KeyValue<TKey, TValue> OnlyKey<TKey, TValue>(in TKey key, in long version)
+        {
+            throw new NotImplementedException();
+        }
+
+        public static KeyValue<TKey, TValue> OnlyValue<TKey, TValue>(in TValue value)
+        {
+            return new KeyValue<TKey, TValue>(default, default, -2, KeyValuePresence.KeyMissing);
+        }
+
+        public static KeyValue<TKey, TValue> OnlyValue<TKey, TValue>(in TValue value, in long version)
+        {
+            throw new NotImplementedException();
+        }
+
+    }
+
+
+
+    // NB `in` in ctor gives 95% of perf gain, not `ref struct`, but keep it as ref struct for semantics and potential upgrade to ref fields when they are implemented
+    // Also it's fatter due to version so it's better to restrict saving it in arrays/fields.
+
+    // TODO xml docs
+    /// <summary>
+    /// Stack-only struct that represents references to a key and value pair. It's like an
+    /// Opt[KeyValuePair[TKey, TValue]], but Opt cannot have ref struct.
+    /// It has IsMissing/IsPresent properties that must be checked if this struct could be
+    /// `undefined`/default/null, but Key and Value properties do not check this condition
+    /// for performance reasons.
+    /// </summary>
+    /// <typeparam name="TKey"></typeparam>
+    /// <typeparam name="TValue"></typeparam>
+    public struct KeyValue<TKey, TValue>
     {
         // NB See https://github.com/dotnet/csharplang/issues/1147
         // and https://github.com/dotnet/corert/blob/796aeaa64ec09da3e05683111c864b529bcc17e8/src/System.Private.CoreLib/src/System/ByReference.cs
-        // Use it when it is made public
+        // Try using it when it is made public
 
-        // Pointers 2x faster than KVP but require pinned source
-        //private readonly IntPtr _kp;
-        //private readonly IntPtr _vp;
-
-        private TKey _k;
-        private TValue _v;
-        private long _version;
+        // ReSharper disable InconsistentNaming
+        // NB could be used from cursors
+        internal TKey _k;
+        internal TValue _v;
+        internal long _version;
+        // ReSharper restore InconsistentNaming
 
         public TKey Key
         {
@@ -27,7 +88,7 @@ namespace KVPSpan
 #if DEBUG
                 if (IsMissing) { throw new NullReferenceException("Must check IsMissing property of KeyValue before accesing Key/Value if unsure that a value exists"); }
 #endif
-                return _k; // SRCS.Unsafe.ReadUnaligned<TKey>((void*)_kp);
+                return _k;
             }
         }
 
@@ -39,8 +100,7 @@ namespace KVPSpan
 #if DEBUG
                 if (IsMissing) { throw new NullReferenceException("Must check IsMissing property of KeyValue before accesing Key/Value if unsure that a value exists"); }
 #endif
-                // NB On x86_64 no visible perf diff, use Unaligned te be safe than sorry later
-                return _v; // SRCS.Unsafe.ReadUnaligned<TValue>((void*)_vp);
+                return _v;
             }
         }
 
@@ -49,7 +109,7 @@ namespace KVPSpan
             [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
             get
             {
-                return _version == 0; // _kp == IntPtr.Zero && _vp == IntPtr.Zero;
+                return _version == 0;
             }
         }
 
@@ -59,6 +119,19 @@ namespace KVPSpan
             get
             {
                 return !IsMissing;
+            }
+        }
+
+        public KeyValuePresence Presence
+        {
+            [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                if (_version == -1 || _version > 0)
+                {
+                    return KeyValuePresence.BothPresent;
+                }
+                return (KeyValuePresence)_version;
             }
         }
 
@@ -77,37 +150,34 @@ namespace KVPSpan
             _k = k;
             _v = v;
             _version = -1;
-            //_kp = (IntPtr)SRCS.Unsafe.AsPointer(ref SRCS.Unsafe.AsRef(k));
-            //_vp = (IntPtr)SRCS.Unsafe.AsPointer(ref SRCS.Unsafe.AsRef(v));
         }
 
-        //[SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
-        //public KeyValue(TKey k, TValue v)
-        //{
-        //    _k = k;
-        //    _v = v;
-        //    _version = -1;
-        //    //_kp = (IntPtr)SRCS.Unsafe.AsPointer(ref k);
-        //    //_vp = (IntPtr)SRCS.Unsafe.AsPointer(ref v);
-        //}
+        [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        public KeyValue(in TKey k, in TValue v, in long version)
+        {
+            //if (version <= 0)
+            //{
+            //    ThrowHelper.ThrowArgumentException("Version is zero or negative!");
+            //}
+            _k = k;
+            _v = v;
+            _version = version;
+        }
 
         [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
-        public KeyValue(KeyValuePair<TKey, TValue> kvp)
+        internal KeyValue(in TKey k, in TValue v, in long version, in KeyValuePresence presense)
         {
-            _k = kvp.Key;
-            _v = kvp.Value;
-            _version = -1;
-            //var k = kvp.Key;
-            //var v = kvp.Value;
-            //_kp = (IntPtr)SRCS.Unsafe.AsPointer(ref k);
-            //_vp = (IntPtr)SRCS.Unsafe.AsPointer(ref v);
+            // TODO bit flags for presense, int62 shall be enough for everyone
+            _k = k;
+            _v = v;
+            _version = version;
         }
 
         // TODO make implicit after refactoring all projetcs
         [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
         public static explicit operator KeyValue<TKey, TValue>(KeyValuePair<TKey, TValue> kvp)
         {
-            return new KeyValue<TKey, TValue>(kvp);
+            return new KeyValue<TKey, TValue>(kvp.Key, kvp.Value);
         }
 
         [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
@@ -140,14 +210,9 @@ namespace KVPSpan
             return new KeyValuePair<long, double>(_keys[i], _values[i]);
         }
 
-        public KeyValue<long, double> GetKVS(int i)
+        public KeyValue<long, double> GetKV(int i)
         {
-            //fixed (void* pk = &_keys[0])
-            //fixed (void* pv = &_values[0])
-            //{
-            //    return new KeyValueSpan<long, double>(Unsafe.Add<long>(pk, i), Unsafe.Add<double>(pv, i));
-            //}
-            return new KeyValue<long, double>(_keys[i], _values[i]);
+            return new KeyValue<long, double>(in _keys[i], in _values[i]);
         }
     }
 
@@ -188,7 +253,7 @@ namespace KVPSpan
                 {
                     for (int i = 0; i < count; i++)
                     {
-                        var kv = container.GetKVS(i);
+                        var kv = container.GetKV(i);
                         sum2 += kv.Key + kv.Value;
                     }
                 }
@@ -196,26 +261,9 @@ namespace KVPSpan
                 sw.Stop();
                 if (sum2 < long.MaxValue)
                 {
-                    Console.WriteLine($"KVS elapsed {sw.ElapsedMilliseconds}  with sum: {sum2}");
+                    Console.WriteLine($"KV elapsed {sw.ElapsedMilliseconds} with sum: {sum2}");
                 }
 
-                //var sum3 = 0.0;
-                //sw.Restart();
-                //for (int j = 0; j < repeat; j++)
-                //{
-                //    for (int i = 0; i < count; i++)
-                //    {
-                //        var kvp = container.GetKVP(i);
-                //        var kv = new KeyValue<long, double>(kvp);
-                //        sum3 += kv.Key + kv.Value;
-                //    }
-                //}
-
-                //sw.Stop();
-                //if (sum2 < long.MaxValue)
-                //{
-                //    Console.WriteLine($"KVP -> KVS elapsed {sw.ElapsedMilliseconds}  with sum: {sum2}");
-                //}
             }
 
             Console.WriteLine("Finished");
