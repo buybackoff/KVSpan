@@ -17,41 +17,6 @@ namespace KVPSpan
     }
 
 
-    public static class KeyValue
-    {
-
-        public static KeyValue<TKey, TValue> Create<TKey, TValue>(in TKey key, in TValue value)
-        {
-            return new KeyValue<TKey, TValue>(in key, in value);
-        }
-
-        public static KeyValue<TKey, TValue> Create<TKey, TValue>(in TKey key, in TValue value, in long version)
-        {
-            return new KeyValue<TKey, TValue>(in key, in value, in version);
-        }
-
-        public static KeyValue<TKey, TValue> OnlyKey<TKey, TValue>(in TKey key)
-        {
-            return new KeyValue<TKey, TValue>(in key, default, -3, KeyValuePresence.ValueMissing);
-        }
-
-        public static KeyValue<TKey, TValue> OnlyKey<TKey, TValue>(in TKey key, in long version)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static KeyValue<TKey, TValue> OnlyValue<TKey, TValue>(in TValue value)
-        {
-            return new KeyValue<TKey, TValue>(default, default, -2, KeyValuePresence.KeyMissing);
-        }
-
-        public static KeyValue<TKey, TValue> OnlyValue<TKey, TValue>(in TValue value, in long version)
-        {
-            throw new NotImplementedException();
-        }
-
-    }
-
 
 
     // NB `in` in ctor gives 95% of perf gain, not `ref struct`, but keep it as ref struct for semantics and potential upgrade to ref fields when they are implemented
@@ -67,7 +32,7 @@ namespace KVPSpan
     /// </summary>
     /// <typeparam name="TKey"></typeparam>
     /// <typeparam name="TValue"></typeparam>
-    public struct KeyValue<TKey, TValue>
+    public ref struct KeyValue<TKey, TValue>
     {
         // NB See https://github.com/dotnet/csharplang/issues/1147
         // and https://github.com/dotnet/corert/blob/796aeaa64ec09da3e05683111c864b529bcc17e8/src/System.Private.CoreLib/src/System/ByReference.cs
@@ -77,7 +42,6 @@ namespace KVPSpan
         // NB could be used from cursors
         internal TKey _k;
         internal TValue _v;
-        internal long _version;
         // ReSharper restore InconsistentNaming
 
         public TKey Key
@@ -104,74 +68,74 @@ namespace KVPSpan
             }
         }
 
-        public bool IsMissing
-        {
-            [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                return _version == 0;
-            }
-        }
+        //public bool IsMissing
+        //{
+        //    [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        //    get
+        //    {
+        //        return _version == 0;
+        //    }
+        //}
 
-        public bool IsPresent
-        {
-            [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                return !IsMissing;
-            }
-        }
+        //public bool IsPresent
+        //{
+        //    [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        //    get
+        //    {
+        //        return !IsMissing;
+        //    }
+        //}
 
-        public KeyValuePresence Presence
-        {
-            [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                if (_version == -1 || _version > 0)
-                {
-                    return KeyValuePresence.BothPresent;
-                }
-                return (KeyValuePresence)_version;
-            }
-        }
+        //public KeyValuePresence Presence
+        //{
+        //    [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        //    get
+        //    {
+        //        if (_version == -1 || _version > 0)
+        //        {
+        //            return KeyValuePresence.BothPresent;
+        //        }
+        //        return (KeyValuePresence)_version;
+        //    }
+        //}
 
-        public long Version
-        {
-            [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                return _version;
-            }
-        }
+        //public long Version
+        //{
+        //    [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        //    get
+        //    {
+        //        return _version;
+        //    }
+        //}
 
         [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
         public KeyValue(in TKey k, in TValue v)
         {
             _k = k;
             _v = v;
-            _version = -1;
+            // _version = -1;
         }
 
-        [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
-        public KeyValue(in TKey k, in TValue v, in long version)
-        {
-            //if (version <= 0)
-            //{
-            //    ThrowHelper.ThrowArgumentException("Version is zero or negative!");
-            //}
-            _k = k;
-            _v = v;
-            _version = version;
-        }
+        //[SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        //public KeyValue(in TKey k, in TValue v, in long version)
+        //{
+        //    //if (version <= 0)
+        //    //{
+        //    //    ThrowHelper.ThrowArgumentException("Version is zero or negative!");
+        //    //}
+        //    _k = k;
+        //    _v = v;
+        //    _version = version;
+        //}
 
-        [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
-        internal KeyValue(in TKey k, in TValue v, in long version, in KeyValuePresence presense)
-        {
-            // TODO bit flags for presense, int62 shall be enough for everyone
-            _k = k;
-            _v = v;
-            _version = version;
-        }
+        //[SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        //internal KeyValue(in TKey k, in TValue v, in long version, in KeyValuePresence presense)
+        //{
+        //    // TODO bit flags for presense, int62 shall be enough for everyone
+        //    _k = k;
+        //    _v = v;
+        //    _version = version;
+        //}
 
         // TODO make implicit after refactoring all projetcs
         [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
@@ -205,14 +169,16 @@ namespace KVPSpan
             }
         }
 
+        [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
         public KeyValuePair<long, double> GetKVP(int i)
         {
             return new KeyValuePair<long, double>(_keys[i], _values[i]);
         }
 
+        [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
         public KeyValue<long, double> GetKV(int i)
         {
-            return new KeyValue<long, double>(in _keys[i], in _values[i]);
+            return new KeyValue<long, double>(_keys[i], _values[i]);
         }
     }
 
