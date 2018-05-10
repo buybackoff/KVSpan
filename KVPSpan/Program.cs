@@ -1,51 +1,98 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
+using SRCS = System.Runtime.CompilerServices;
 
 namespace KVPSpan
 {
-    public unsafe struct KeyValueRef<TKey, TValue>
+    public readonly unsafe ref struct KeyValue<TKey, TValue>
     {
-        private void* kp;
-        private void* vp;
+        // NB See https://github.com/dotnet/csharplang/issues/1147
+        // and https://github.com/dotnet/corert/blob/796aeaa64ec09da3e05683111c864b529bcc17e8/src/System.Private.CoreLib/src/System/ByReference.cs
+        // Use it when it is made public
+
+        private readonly IntPtr _kp;
+
+        private readonly IntPtr _vp;
 
         public TKey Key
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
             get
             {
-                return Unsafe.ReadUnaligned<TKey>(kp);
+#if DEBUG
+                if (IsMissing) { throw new NullReferenceException("Must check IsMissing property of KeyValue before accesing Key/Value if unsure that a value exists"); }
+#endif
+                // NB On x86_64 no visible perf diff, use Unaligned te be safe than sorry later
+                return SRCS.Unsafe.ReadUnaligned<TKey>((void*)_kp);
             }
         }
 
         public TValue Value
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
             get
             {
-                return Unsafe.ReadUnaligned<TValue>(vp);
+#if DEBUG
+                if (IsMissing) { throw new NullReferenceException("Must check IsMissing property of KeyValue before accesing Key/Value if unsure that a value exists"); }
+#endif
+                // NB On x86_64 no visible perf diff, use Unaligned te be safe than sorry later
+                return SRCS.Unsafe.ReadUnaligned<TValue>((void*)_vp);
             }
         }
 
-        public KeyValueRef(ref TKey k, ref TValue v)
+        public bool IsMissing
         {
-            kp = Unsafe.AsPointer(ref k);
-            vp = Unsafe.AsPointer(ref v);
+            [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return _kp == IntPtr.Zero && _vp == IntPtr.Zero;
+            }
         }
 
-        public KeyValueRef(TKey k, TValue v)
+        public bool IsPresent
         {
-            kp = Unsafe.AsPointer(ref k);
-            vp = Unsafe.AsPointer(ref v);
+            [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return !(_kp == IntPtr.Zero && _vp == IntPtr.Zero);
+            }
         }
 
-        public KeyValueRef(KeyValuePair<TKey, TValue> kvp)
+        [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        public KeyValue(in TKey k, in TValue v)
+        {
+            _kp = (IntPtr)SRCS.Unsafe.AsPointer(ref SRCS.Unsafe.AsRef(k));
+            _vp = (IntPtr)SRCS.Unsafe.AsPointer(ref SRCS.Unsafe.AsRef(v));
+        }
+
+        [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        public KeyValue(TKey k, TValue v)
+        {
+            _kp = (IntPtr)SRCS.Unsafe.AsPointer(ref k);
+            _vp = (IntPtr)SRCS.Unsafe.AsPointer(ref v);
+        }
+
+        [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        public KeyValue(KeyValuePair<TKey, TValue> kvp)
         {
             var k = kvp.Key;
             var v = kvp.Value;
-            kp = Unsafe.AsPointer(ref k);
-            vp = Unsafe.AsPointer(ref v);
+            _kp = (IntPtr)SRCS.Unsafe.AsPointer(ref k);
+            _vp = (IntPtr)SRCS.Unsafe.AsPointer(ref v);
+        }
+
+        // TODO make implicit after refactoring all projetcs
+        [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        public static explicit operator KeyValue<TKey, TValue>(KeyValuePair<TKey, TValue> kvp)
+        {
+            return new KeyValue<TKey, TValue>(kvp);
+        }
+
+        [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        public static explicit operator KeyValuePair<TKey, TValue>(KeyValue<TKey, TValue> kv)
+        {
+            return new KeyValuePair<TKey, TValue>(kv.Key, kv.Value);
         }
     }
 
@@ -72,14 +119,14 @@ namespace KVPSpan
             return new KeyValuePair<long, double>(_keys[i], _values[i]);
         }
 
-        public KeyValueRef<long, double> GetKVS(int i)
+        public KeyValue<long, double> GetKVS(int i)
         {
             //fixed (void* pk = &_keys[0])
             //fixed (void* pv = &_values[0])
             //{
             //    return new KeyValueSpan<long, double>(Unsafe.Add<long>(pk, i), Unsafe.Add<double>(pv, i));
             //}
-            return new KeyValueRef<long, double>(ref _keys[i], ref _values[i]);
+            return new KeyValue<long, double>(in _keys[i], in _values[i]);
         }
     }
 
@@ -98,8 +145,6 @@ namespace KVPSpan
             for (int r = 0; r < rounds; r++)
             {
                 var sum1 = 0.0;
-                var sum2 = 0.0;
-                var sum3 = 0.0;
 
                 sw.Restart();
                 for (int j = 0; j < repeat; j++)
@@ -116,6 +161,7 @@ namespace KVPSpan
                     Console.WriteLine($"KVP elapsed {sw.ElapsedMilliseconds} with sum: {sum1}");
                 }
 
+                var sum2 = 0.0;
                 sw.Restart();
                 for (int j = 0; j < repeat; j++)
                 {
@@ -132,22 +178,23 @@ namespace KVPSpan
                     Console.WriteLine($"KVS elapsed {sw.ElapsedMilliseconds}  with sum: {sum2}");
                 }
 
-                sw.Restart();
-                for (int j = 0; j < repeat; j++)
-                {
-                    for (int i = 0; i < count; i++)
-                    {
-                        var kvp = container.GetKVP(i);
-                        var kv = new KeyValueRef<long, double>(kvp);
-                        sum3 += kv.Key + kv.Value;
-                    }
-                }
+                //var sum3 = 0.0;
+                //sw.Restart();
+                //for (int j = 0; j < repeat; j++)
+                //{
+                //    for (int i = 0; i < count; i++)
+                //    {
+                //        var kvp = container.GetKVP(i);
+                //        var kv = new KeyValue<long, double>(kvp);
+                //        sum3 += kv.Key + kv.Value;
+                //    }
+                //}
 
-                sw.Stop();
-                if (sum2 < long.MaxValue)
-                {
-                    Console.WriteLine($"KVP -> KVS elapsed {sw.ElapsedMilliseconds}  with sum: {sum2}");
-                }
+                //sw.Stop();
+                //if (sum2 < long.MaxValue)
+                //{
+                //    Console.WriteLine($"KVP -> KVS elapsed {sw.ElapsedMilliseconds}  with sum: {sum2}");
+                //}
             }
 
             Console.WriteLine("Finished");
