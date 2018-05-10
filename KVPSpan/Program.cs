@@ -5,15 +5,19 @@ using SRCS = System.Runtime.CompilerServices;
 
 namespace KVPSpan
 {
-    public readonly unsafe ref struct KeyValue<TKey, TValue>
+    public unsafe struct KeyValue<TKey, TValue>
     {
         // NB See https://github.com/dotnet/csharplang/issues/1147
         // and https://github.com/dotnet/corert/blob/796aeaa64ec09da3e05683111c864b529bcc17e8/src/System.Private.CoreLib/src/System/ByReference.cs
         // Use it when it is made public
 
-        private readonly IntPtr _kp;
+        // Pointers 2x faster than KVP but require pinned source
+        //private readonly IntPtr _kp;
+        //private readonly IntPtr _vp;
 
-        private readonly IntPtr _vp;
+        private TKey _k;
+        private TValue _v;
+        private long _version;
 
         public TKey Key
         {
@@ -23,8 +27,7 @@ namespace KVPSpan
 #if DEBUG
                 if (IsMissing) { throw new NullReferenceException("Must check IsMissing property of KeyValue before accesing Key/Value if unsure that a value exists"); }
 #endif
-                // NB On x86_64 no visible perf diff, use Unaligned te be safe than sorry later
-                return SRCS.Unsafe.ReadUnaligned<TKey>((void*)_kp);
+                return _k; // SRCS.Unsafe.ReadUnaligned<TKey>((void*)_kp);
             }
         }
 
@@ -37,7 +40,7 @@ namespace KVPSpan
                 if (IsMissing) { throw new NullReferenceException("Must check IsMissing property of KeyValue before accesing Key/Value if unsure that a value exists"); }
 #endif
                 // NB On x86_64 no visible perf diff, use Unaligned te be safe than sorry later
-                return SRCS.Unsafe.ReadUnaligned<TValue>((void*)_vp);
+                return _v; // SRCS.Unsafe.ReadUnaligned<TValue>((void*)_vp);
             }
         }
 
@@ -46,7 +49,7 @@ namespace KVPSpan
             [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
             get
             {
-                return _kp == IntPtr.Zero && _vp == IntPtr.Zero;
+                return _version == 0; // _kp == IntPtr.Zero && _vp == IntPtr.Zero;
             }
         }
 
@@ -55,31 +58,49 @@ namespace KVPSpan
             [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
             get
             {
-                return !(_kp == IntPtr.Zero && _vp == IntPtr.Zero);
+                return !IsMissing;
+            }
+        }
+
+        public long Version
+        {
+            [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return _version;
             }
         }
 
         [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
         public KeyValue(in TKey k, in TValue v)
         {
-            _kp = (IntPtr)SRCS.Unsafe.AsPointer(ref SRCS.Unsafe.AsRef(k));
-            _vp = (IntPtr)SRCS.Unsafe.AsPointer(ref SRCS.Unsafe.AsRef(v));
+            _k = k;
+            _v = v;
+            _version = -1;
+            //_kp = (IntPtr)SRCS.Unsafe.AsPointer(ref SRCS.Unsafe.AsRef(k));
+            //_vp = (IntPtr)SRCS.Unsafe.AsPointer(ref SRCS.Unsafe.AsRef(v));
         }
 
-        [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
-        public KeyValue(TKey k, TValue v)
-        {
-            _kp = (IntPtr)SRCS.Unsafe.AsPointer(ref k);
-            _vp = (IntPtr)SRCS.Unsafe.AsPointer(ref v);
-        }
+        //[SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
+        //public KeyValue(TKey k, TValue v)
+        //{
+        //    _k = k;
+        //    _v = v;
+        //    _version = -1;
+        //    //_kp = (IntPtr)SRCS.Unsafe.AsPointer(ref k);
+        //    //_vp = (IntPtr)SRCS.Unsafe.AsPointer(ref v);
+        //}
 
         [SRCS.MethodImpl(SRCS.MethodImplOptions.AggressiveInlining)]
         public KeyValue(KeyValuePair<TKey, TValue> kvp)
         {
-            var k = kvp.Key;
-            var v = kvp.Value;
-            _kp = (IntPtr)SRCS.Unsafe.AsPointer(ref k);
-            _vp = (IntPtr)SRCS.Unsafe.AsPointer(ref v);
+            _k = kvp.Key;
+            _v = kvp.Value;
+            _version = -1;
+            //var k = kvp.Key;
+            //var v = kvp.Value;
+            //_kp = (IntPtr)SRCS.Unsafe.AsPointer(ref k);
+            //_vp = (IntPtr)SRCS.Unsafe.AsPointer(ref v);
         }
 
         // TODO make implicit after refactoring all projetcs
@@ -126,7 +147,7 @@ namespace KVPSpan
             //{
             //    return new KeyValueSpan<long, double>(Unsafe.Add<long>(pk, i), Unsafe.Add<double>(pv, i));
             //}
-            return new KeyValue<long, double>(in _keys[i], in _values[i]);
+            return new KeyValue<long, double>(_keys[i], _values[i]);
         }
     }
 
